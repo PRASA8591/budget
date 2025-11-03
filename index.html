@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Budget Manager</title>
+<style>
+  body {
+    font-family: "Poppins", sans-serif;
+    margin: 0;
+    padding: 0;
+    background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+  }
+  .container {
+    background: white;
+    width: 95%;
+    max-width: 450px;
+    margin: 20px auto;
+    padding: 20px;
+    border-radius: 15px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  }
+  h1 {
+    text-align: center;
+    color: #1976d2;
+    margin-bottom: 10px;
+  }
+  .input-group {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+  }
+  .input-group input, select, button {
+    padding: 10px;
+    font-size: 15px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+  }
+  .input-group input[type="number"] {
+    flex: 1;
+  }
+  button {
+    cursor: pointer;
+    background: #1976d2;
+    color: white;
+    border: none;
+    transition: 0.3s;
+  }
+  button:hover {
+    background: #0d47a1;
+  }
+  .balance-box {
+    background: #e3f2fd;
+    padding: 15px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    text-align: center;
+    font-size: 18px;
+  }
+  .transactions {
+    max-height: 250px;
+    overflow-y: auto;
+  }
+  .transaction {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #f9f9f9;
+    padding: 8px 12px;
+    margin: 5px 0;
+    border-left: 5px solid;
+    border-radius: 8px;
+  }
+  .transaction.plus {
+    border-color: #43a047;
+    color: #2e7d32;
+  }
+  .transaction.minus {
+    border-color: #e53935;
+    color: #c62828;
+  }
+  .transaction button {
+    background: transparent;
+    color: inherit;
+    border: none;
+    cursor: pointer;
+    font-size: 14px;
+    margin-left: 5px;
+  }
+  @media (max-width: 480px) {
+    .input-group {
+      flex-direction: column;
+    }
+    button {
+      width: 100%;
+    }
+  }
+  /* Popup */
+  .popup-bg {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.5);
+    display: none;
+    justify-content: center;
+    align-items: center;
+  }
+  .popup {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    text-align: center;
+    width: 80%;
+    max-width: 300px;
+  }
+  .popup h3 {
+    margin-bottom: 20px;
+  }
+  .popup button {
+    margin: 5px;
+    width: 80px;
+  }
+</style>
+</head>
+<body>
+  <div class="container">
+    <h1>Budget Manager</h1>
+
+    <div class="input-group">
+      <input type="number" id="totalBudget" placeholder="Enter total budget">
+      <button onclick="setBudget()">Set</button>
+    </div>
+
+    <div class="balance-box">
+      <strong>Total Budget:</strong> <span id="displayBudget">0</span><br>
+      <strong>Remaining Balance:</strong> <span id="remainingBalance">0</span>
+    </div>
+
+    <div class="input-group">
+      <input type="text" id="desc" placeholder="Description">
+      <input type="number" id="amount" placeholder="Amount">
+      <select id="type">
+        <option value="+">+</option>
+        <option value="-">-</option>
+      </select>
+      <button onclick="addTransaction()">Add</button>
+    </div>
+
+    <div class="transactions" id="transactionsList"></div>
+  </div>
+
+  <!-- Custom Popup -->
+  <div class="popup-bg" id="popupBg">
+    <div class="popup">
+      <h3 id="popupMsg">Confirm action?</h3>
+      <button id="popupYes">Yes</button>
+      <button id="popupNo">No</button>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
+
+<script>
+  // Your Firebase Config
+  const firebaseConfig = {
+    apiKey: "AIzaSyApOmFTkgRk-Jo5DWzd2dKFWs32ZwqaMOg",
+    authDomain: "budget-c1d78.firebaseapp.com",
+    projectId: "budget-c1d78",
+    storageBucket: "budget-c1d78.firebasestorage.app",
+    messagingSenderId: "235803369806",
+    appId: "1:235803369806:web:44262f8284916f6c7ffe1f",
+    measurementId: "G-H798ZEY3ET"
+  };
+  firebase.initializeApp(firebaseConfig);
+  const db = firebase.firestore();
+
+  let totalBudget = 0;
+  let remaining = 0;
+  let transactions = [];
+
+  async function setBudget() {
+    const val = parseFloat(document.getElementById('totalBudget').value);
+    if (isNaN(val) || val <= 0) {
+      alert('Please enter a valid total budget.');
+      return;
+    }
+    totalBudget = val;
+    remaining = val;
+    await db.collection("settings").doc("budget").set({ total: totalBudget });
+    updateDisplay();
+    calcRemaining();
+  }
+
+  async function addTransaction() {
+    const desc = document.getElementById('desc').value.trim();
+    const amount = parseFloat(document.getElementById('amount').value);
+    const type = document.getElementById('type').value;
+    if (!desc || isNaN(amount) || amount <= 0) {
+      alert('Please fill all fields with valid values.');
+      return;
+    }
+
+    await db.collection("transactions").add({ desc, amount, type, timestamp: Date.now() });
+    document.getElementById('desc').value = '';
+    document.getElementById('amount').value = '';
+  }
+
+  function updateDisplay() {
+    document.getElementById('displayBudget').textContent = totalBudget.toFixed(2);
+    document.getElementById('remainingBalance').textContent = remaining.toFixed(2);
+  }
+
+  function calcRemaining() {
+    let totalPlus = transactions.filter(t=>t.type==='+').reduce((sum,t)=>sum+t.amount,0);
+    let totalMinus = transactions.filter(t=>t.type==='-').reduce((sum,t)=>sum+t.amount,0);
+    remaining = totalBudget + totalPlus - totalMinus;
+    updateDisplay();
+  }
+
+  function showPopup(message, onConfirm) {
+    const popupBg = document.getElementById('popupBg');
+    const msg = document.getElementById('popupMsg');
+    const yes = document.getElementById('popupYes');
+    const no = document.getElementById('popupNo');
+    msg.textContent = message;
+    popupBg.style.display = 'flex';
+    yes.onclick = () => { popupBg.style.display = 'none'; onConfirm(); };
+    no.onclick = () => { popupBg.style.display = 'none'; };
+  }
+
+  async function deleteTransaction(id) {
+    showPopup("Delete this record?", async () => {
+      await db.collection("transactions").doc(id).delete();
+    });
+  }
+
+  async function editTransaction(id, oldData) {
+    const newDesc = prompt("Edit Description:", oldData.desc);
+    const newAmt = parseFloat(prompt("Edit Amount:", oldData.amount));
+    if (!newDesc || isNaN(newAmt)) return;
+    showPopup("Confirm edit this record?", async () => {
+      await db.collection("transactions").doc(id).update({ desc: newDesc, amount: newAmt });
+    });
+  }
+
+  function renderTransactions() {
+    const list = document.getElementById('transactionsList');
+    list.innerHTML = '';
+    transactions.forEach(t => {
+      const div = document.createElement('div');
+      div.classList.add('transaction', t.type === '+' ? 'plus' : 'minus');
+      div.innerHTML = `
+        <span>${t.desc}</span>
+        <span>${t.type}${t.amount.toFixed(2)}</span>
+        <div>
+          <button onclick="editTransaction('${t.id}', ${JSON.stringify(t).replace(/"/g, '&quot;')})">✏️</button>
+          <button onclick="deleteTransaction('${t.id}')">🗑️</button>
+        </div>
+      `;
+      list.appendChild(div);
+    });
+  }
+
+  // Live listener for changes
+  db.collection("transactions").orderBy("timestamp", "desc").onSnapshot(snapshot => {
+    transactions = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    calcRemaining();
+    renderTransactions();
+  });
+
+  // Load saved budget
+  db.collection("settings").doc("budget").onSnapshot(doc => {
+    if (doc.exists) {
+      totalBudget = doc.data().total;
+      calcRemaining();
+    }
+  });
+</script>
+</body>
+</html>
